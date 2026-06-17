@@ -1,8 +1,9 @@
 # ============================================================
 # UPLOAD TO TOOLBOX
 # Watches for "Approved" label on issues in ops repo
-# Triggers deploy and changes label to "Deployed to toolbox"
-# On failure → adds "Deployment failed" label
+# Triggers deploy and changes label accordingly:
+# Success → "Deployed to toolbox"
+# Failure → "Deployment failed"
 #
 # GITEA MIGRATION:
 # - Replace ubuntu-latest with self-hosted runner name
@@ -31,6 +32,7 @@ jobs:
           echo "repo=$REPO" >> $GITHUB_OUTPUT
 
       # ── Trigger central deploy workflow ───────────────────
+      # Returns 204 on success, anything else = failure
       # GITEA: replace api.github.com with gitea.company.internal/api/v1
       # GITEA: replace cbcbmbtTest with Gitea org name
       - name: Trigger deploy
@@ -53,7 +55,7 @@ jobs:
 
       # ── Remove Approved label ─────────────────────────────
       - name: Remove Approved label
-        if: success()
+        if: always()
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
@@ -64,6 +66,7 @@ jobs:
             "https://api.github.com/repos/cbcbmbtTest/ops/issues/$ISSUE/labels/Approved"
 
       # ── Add Deployed to toolbox label ─────────────────────
+      # Only if deploy dispatch succeeded
       # Issue stays OPEN — shows app is live on server
       - name: Add Deployed to toolbox label
         if: success()
@@ -78,10 +81,10 @@ jobs:
             -d '{"labels":["Deployed to toolbox"]}'
 
       # ── Add Deployment failed label ───────────────────────
-      # Runs only if deploy dispatch failed
-      # Admin sees red label on issue
+      # Only if deploy dispatch failed
+      # Admin sees red label → knows something went wrong
       # GITEA: replace api.github.com with gitea.company.internal/api/v1
-      - name: Add deployment failed label
+      - name: Add Deployment failed label
         if: failure()
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
