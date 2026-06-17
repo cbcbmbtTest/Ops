@@ -29,6 +29,10 @@ on:
         description: 'Version tag (leave empty for latest)'
         required: false
         default: 'main'
+      issue_number:
+        description: 'Ops issue number'
+        required: false
+        default: ''
 
 jobs:
   # ── Detect tech ─────────────────────────────────────────
@@ -92,6 +96,7 @@ jobs:
       repo: ${{ inputs.repo }}
       slug: ${{ needs.detect.outputs.slug }}
       version: ${{ inputs.version }}
+      issue_number: ${{ inputs.issue_number }}
     secrets: inherit
 
   deploy-node:
@@ -102,6 +107,7 @@ jobs:
       repo: ${{ inputs.repo }}
       slug: ${{ needs.detect.outputs.slug }}
       version: ${{ inputs.version }}
+      issue_number: ${{ inputs.issue_number }}
     secrets: inherit
 
   deploy-python:
@@ -112,4 +118,5 @@ jobs:
       repo: ${{ inputs.repo }}
       slug: ${{ needs.detect.outputs.slug }}
       version: ${{ inputs.version }}
+      issue_number: ${{ inputs.issue_number }}
     secrets: inherit
