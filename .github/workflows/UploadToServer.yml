@@ -2,6 +2,7 @@
 # UPLOAD TO TOOLBOX
 # Watches for "Approved" label on issues in ops repo
 # Triggers deploy and changes label to "Deployed to toolbox"
+# On failure → adds "Deployment failed" label
 #
 # GITEA MIGRATION:
 # - Replace ubuntu-latest with self-hosted runner name
@@ -30,23 +31,29 @@ jobs:
           echo "repo=$REPO" >> $GITHUB_OUTPUT
 
       # ── Trigger central deploy workflow ───────────────────
-      # Passes repo name AND issue number to deploy.yml
       # GITEA: replace api.github.com with gitea.company.internal/api/v1
       # GITEA: replace cbcbmbtTest with Gitea org name
       - name: Trigger deploy
+        id: deploy
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           REPO: ${{ steps.extract.outputs.repo }}
           ISSUE: ${{ github.event.issue.number }}
         run: |
-          curl -X POST \
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             -H "Authorization: token $TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/cbcbmbtTest/ops/actions/workflows/deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"repo\":\"$REPO\",\"version\":\"main\",\"issue_number\":\"$ISSUE\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"repo\":\"$REPO\",\"version\":\"main\",\"issue_number\":\"$ISSUE\"}}")
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+          if [ "$RESPONSE" != "204" ]; then
+            echo "Deploy dispatch failed with status $RESPONSE"
+            exit 1
+          fi
 
       # ── Remove Approved label ─────────────────────────────
       - name: Remove Approved label
+        if: success()
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
@@ -59,6 +66,7 @@ jobs:
       # ── Add Deployed to toolbox label ─────────────────────
       # Issue stays OPEN — shows app is live on server
       - name: Add Deployed to toolbox label
+        if: success()
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
@@ -68,3 +76,19 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/cbcbmbtTest/ops/issues/$ISSUE/labels \
             -d '{"labels":["Deployed to toolbox"]}'
+
+      # ── Add Deployment failed label ───────────────────────
+      # Runs only if deploy dispatch failed
+      # Admin sees red label on issue
+      # GITEA: replace api.github.com with gitea.company.internal/api/v1
+      - name: Add deployment failed label
+        if: failure()
+        env:
+          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          curl -X POST \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/cbcbmbtTest/ops/issues/$ISSUE/labels \
+            -d '{"labels":["Deployment failed"]}'
