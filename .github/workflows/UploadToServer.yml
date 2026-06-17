@@ -1,0 +1,82 @@
+# ============================================================
+# UPLOAD TO TOOLBOX (LABELS FLOW)
+# Watches for "Approved" label on issues in ops-labels
+# Triggers deploy.yml and updates labels accordingly:
+# Success → "Deployed to toolbox"
+# Failure → "Deployment failed"
+#
+# GITEA MIGRATION:
+# - Replace ubuntu-latest with self-hosted runner name
+# - Replace api.github.com with gitea.company.internal/api/v1
+# - Replace cbcbmbtTest with Gitea org name
+# ============================================================
+
+name: Upload to Toolbox
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  approve:
+    if: github.event.label.name == 'Approved'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract repo name
+        id: extract
+        run: |
+          TITLE="${{ github.event.issue.title }}"
+          REPO=$(echo "$TITLE" | sed 's/Deploy //' | awk '{print $1}')
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+
+      - name: Trigger deploy
+        env:
+          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          REPO: ${{ steps.extract.outputs.repo }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/cbcbmbtTest/ops-labels/actions/workflows/deploy.yml/dispatches \
+            -d "{\"ref\":\"main\",\"inputs\":{\"repo\":\"$REPO\",\"version\":\"main\",\"issue_number\":\"$ISSUE\"}}")
+          if [ "$RESPONSE" != "204" ]; then
+            echo "Deploy dispatch failed with status $RESPONSE"
+            exit 1
+          fi
+
+      - name: Remove Approved label
+        if: always()
+        env:
+          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          curl -X DELETE \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/cbcbmbtTest/ops-labels/issues/$ISSUE/labels/Approved"
+
+      - name: Add Deployed to toolbox label
+        if: success()
+        env:
+          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          curl -X POST \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/cbcbmbtTest/ops-labels/issues/$ISSUE/labels \
+            -d '{"labels":["Deployed to toolbox"]}'
+
+      - name: Add Deployment failed label
+        if: failure()
+        env:
+          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          curl -X POST \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/cbcbmbtTest/ops-labels/issues/$ISSUE/labels \
+            -d '{"labels":["Deployment failed"]}'
