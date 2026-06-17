@@ -3,6 +3,11 @@
 # Handles static HTML app deployment
 # Called by deploy.yml when tech = html
 #
+# WHEN SERVER READY - uncomment server deployment steps
+# and add secrets:
+# SERVER_HOST    = server IP or hostname
+# SERVER_SSH_KEY = SSH private key
+#
 # GITEA MIGRATION:
 # - Replace ubuntu-latest with self-hosted runner name
 # - Replace cbcbmbtTest with Gitea org name
@@ -23,10 +28,6 @@ on:
       version:
         required: true
         type: string
-      issue_number:
-        required: false
-        type: string
-        default: ''
 
 jobs:
   deploy:
@@ -40,38 +41,38 @@ jobs:
           token: ${{ secrets.REGISTRY_TOKEN }}
           ref: ${{ inputs.version }}
 
-      # ── No build needed ───────────────────────────────────
+      # ── No build needed for static HTML ──────────────────
       - name: No build needed
         run: echo "Static HTML - no build step needed"
 
       # ── Deploy to server ──────────────────────────────────
       # NOT YET IMPLEMENTED - no server available
-      # When server is ready uncomment:
+      # When server ready uncomment:
       #
       # - name: Copy files to server
       #   run: |
       #     scp -r ./* deploy@${{ secrets.SERVER_HOST }}:C:/inetpub/apps/${{ inputs.slug }}/
       #
-      # - name: Configure IIS static site
+      # - name: Configure IIS
       #   run: |
       #     ssh deploy@${{ secrets.SERVER_HOST }} \
       #     "powershell New-WebApplication \
       #       -Name '${{ inputs.slug }}' \
       #       -Site 'Default Web Site' \
       #       -PhysicalPath 'C:\inetpub\apps\${{ inputs.slug }}'"
-      #
-      # SERVER SECRETS TO ADD WHEN READY:
-      # SERVER_HOST    = server IP address
-      # SERVER_SSH_KEY = SSH private key
 
       # ── Register in plugins repo ──────────────────────────
+      # Pushes descriptor to plugins repo
+      # generate.yml triggers → updates index.json
+      # Toolbox reads index.json → shows tile
+      # GITEA: replace github.com with gitea.company.internal
       - name: Register in plugins repo
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
           SLUG="${{ inputs.slug }}"
           DESC=$(jq -r '.description' plugin.json)
-          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "1.0.0")
+          VERSION="${{ inputs.version }}"
 
           cat > $SLUG.json << EOF
           {
@@ -90,23 +91,4 @@ jobs:
           cp $SLUG.json plugins/$SLUG.json
           cd plugins
           git config user.email "ci@company.de"
-          git config user.name "CI/CD Bot"
-          git add .
-          git commit -m "chore: register $SLUG v$VERSION"
-          git push https://x-token:$TOKEN@github.com/cbcbmbtTest/plugins main
-
-      # ── Add tech comment to issue ─────────────────────────
-      # Posts tech type as comment on the ops issue
-      # GITEA: replace api.github.com with gitea.company.internal/api/v1
-      # GITEA: replace cbcbmbtTest with Gitea org name
-      - name: Comment tech on issue
-        if: inputs.issue_number != ''
-        env:
-          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
-          ISSUE: ${{ inputs.issue_number }}
-        run: |
-          curl -X POST \
-            -H "Authorization: token $TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/cbcbmbtTest/ops/issues/$ISSUE/comments \
-            -d '{"body":"⚙️ Tech: html"}'
+          git config
