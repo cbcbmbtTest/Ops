@@ -1,8 +1,9 @@
 # ============================================================
-# APPROVAL WORKFLOW
-# Watches for "Approved" label on issues in ops repo
-# When label added → triggers deploy for that app
-# Changes label to "Deployed to toolbox" after deployment
+# UPLOAD TO TOOLBOX / REMOVE FROM TOOLBOX
+# Watches for label changes on issues in ops repo
+#
+# Approved                  → deploys app to toolbox
+# Remove from Toolbox       → removes app from toolbox
 #
 # GITEA MIGRATION:
 # - Replace ubuntu-latest with self-hosted runner name
@@ -10,28 +11,27 @@
 # - Replace cbcbmbtTest with Gitea org name
 # ============================================================
 
-name: Approve Deployment
+name: Upload to Toolbox
 
 on:
   issues:
     types: [labeled]
 
 jobs:
+
+  # ── DEPLOY ───────────────────────────────────────────────
   approve:
     if: github.event.label.name == 'Approved'
     runs-on: ubuntu-latest
 
     steps:
-      # ── Extract app name from issue title ─────────────────
       - name: Extract repo name
         id: extract
         run: |
           TITLE="${{ github.event.issue.title }}"
           REPO=$(echo "$TITLE" | sed 's/Deploy //' | awk '{print $1}')
           echo "repo=$REPO" >> $GITHUB_OUTPUT
-          echo "Deploying: $REPO"
 
-      # ── Trigger central deploy workflow ───────────────────
       - name: Trigger deploy
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
@@ -41,10 +41,9 @@ jobs:
             -H "Authorization: token $TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/cbcbmbtTest/ops/actions/workflows/deploy.yml/dispatches \
-            -d "{\"ref\":\"main\",\"inputs\":{\"repo\":\"$REPO\"}}"
+            -d "{\"ref\":\"main\",\"inputs\":{\"repo\":\"$REPO\",\"version\":\"main\"}}"
 
-      # ── Remove "Approved" label ───────────────────────────
-      - name: Remove approved label
+      - name: Remove Approved label
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
@@ -54,10 +53,7 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/cbcbmbtTest/ops/issues/$ISSUE/labels/Approved"
 
-      # ── Add "Deployed to toolbox" label ───────────────────
-      # Issue stays OPEN — shows app is live on server
-      # To remove app → change label to "Remove"
-      - name: Add deployed to toolbox label
+      - name: Add Deployed to toolbox label
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
@@ -67,3 +63,65 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/cbcbmbtTest/ops/issues/$ISSUE/labels \
             -d '{"labels":["Deployed to toolbox"]}'
+
+  # ── REMOVE ───────────────────────────────────────────────
+  remove:
+    # Only triggers when label is exactly "Remove from Toolbox"
+    if: github.event.label.name == 'Remove from Toolbox'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract repo name and slug
+        id: extract
+        run: |
+          TITLE="${{ github.event.issue.title }}"
+          REPO=$(echo "$TITLE" | sed 's/Deploy //' | awk '{print $1}')
+          SLUG=$(echo "$REPO" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "slug=$SLUG" >> $GITHUB_OUTPUT
+          echo "Removing: $REPO ($SLUG)"
+
+      # ── Remove from server ────────────────────────────────
+      # NOT YET IMPLEMENTED - no server available
+      # When server is ready uncomment:
+      #
+      # - name: Remove from IIS
+      #   run: |
+      #     ssh deploy@${{ secrets.SERVER_HOST }} \
+      #     "powershell Remove-WebApplication -Name '${{ steps.extract.outputs.slug }}'"
+      #
+      # - name: Remove files from server
+      #   run: |
+      #     ssh deploy@${{ secrets.SERVER_HOST }} \
+      #     "rm -rf C:\inetpub\apps\${{ steps.extract.outputs.slug }}"
+
+      # ── Remove from plugins registry ──────────────────────
+      # Deletes {slug}.json from plugins repo
+      # generate.yml triggers automatically
+      # index.json regenerated without this app
+      # Toolbox no longer shows tile
+      - name: Remove from plugins registry
+        env:
+          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          SLUG: ${{ steps.extract.outputs.slug }}
+        run: |
+          git clone https://x-token:$TOKEN@github.com/cbcbmbtTest/plugins
+          cd plugins
+          rm -f $SLUG.json
+          git config user.email "ci@company.de"
+          git config user.name "CI/CD Bot"
+          git add .
+          git diff --staged --quiet || git commit -m "chore: remove $SLUG from registry"
+          git push https://x-token:$TOKEN@github.com/cbcbmbtTest/plugins main
+
+      # ── Close issue ───────────────────────────────────────
+      - name: Close issue
+        env:
+          TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          curl -X PATCH \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/cbcbmbtTest/ops/issues/$ISSUE \
+            -d '{"state":"closed","state_reason":"completed"}'
