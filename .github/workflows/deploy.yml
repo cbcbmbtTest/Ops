@@ -2,12 +2,14 @@
 # CENTRAL DEPLOY WORKFLOW
 # Detects tech and calls correct sub-workflow
 #
-# SUB-WORKFLOWS:
+# SUB-WORKFLOWS (must exist as .yml files):
+# - deploy-html.yml   ✅
+# - deploy-node.yml   ✅
+# - deploy-python.yml ✅
+#
+# ADD LATER when files are created:
 # - deploy-react.yml
 # - deploy-dotnet.yml
-# - deploy-python.yml
-# - deploy-node.yml
-# - deploy-html.yml
 #
 # GITEA MIGRATION:
 # - Replace ubuntu-latest with self-hosted runner name
@@ -44,22 +46,17 @@ jobs:
           token: ${{ secrets.REGISTRY_TOKEN }}
           ref: ${{ inputs.version }}
 
-      # Check plugin.json for manual tech override first
-      # If not set → auto-detect from GitHub languages API
       - name: Detect tech
         id: tech
         env:
           TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           REPO: ${{ inputs.repo }}
         run: |
-          # Check for manual override in plugin.json
           OVERRIDE=$(jq -r '.tech // empty' plugin.json 2>/dev/null)
-
           if [ -n "$OVERRIDE" ]; then
             echo "tech=$OVERRIDE" >> $GITHUB_OUTPUT
             echo "Tech override from plugin.json: $OVERRIDE"
           else
-            # Auto-detect from GitHub languages API
             LANGS=$(curl -s \
               -H "Authorization: token $TOKEN" \
               https://api.github.com/repos/cbcbmbtTest/$REPO/languages)
@@ -87,30 +84,10 @@ jobs:
 
   # ── Call correct sub-workflow ────────────────────────────
 
-  deploy-react:
+  deploy-html:
     needs: detect
-    if: needs.detect.outputs.tech == 'react'
-    uses: cbcbmbtTest/ops/.github/workflows/deploy-react.yml@main
-    with:
-      repo: ${{ inputs.repo }}
-      slug: ${{ needs.detect.outputs.slug }}
-      version: ${{ inputs.version }}
-    secrets: inherit
-
-  deploy-dotnet:
-    needs: detect
-    if: needs.detect.outputs.tech == 'dotnet'
-    uses: cbcbmbtTest/ops/.github/workflows/deploy-dotnet.yml@main
-    with:
-      repo: ${{ inputs.repo }}
-      slug: ${{ needs.detect.outputs.slug }}
-      version: ${{ inputs.version }}
-    secrets: inherit
-
-  deploy-python:
-    needs: detect
-    if: needs.detect.outputs.tech == 'python'
-    uses: cbcbmbtTest/ops/.github/workflows/deploy-python.yml@main
+    if: needs.detect.outputs.tech == 'html'
+    uses: cbcbmbtTest/ops/.github/workflows/deploy-html.yml@main
     with:
       repo: ${{ inputs.repo }}
       slug: ${{ needs.detect.outputs.slug }}
@@ -127,10 +104,10 @@ jobs:
       version: ${{ inputs.version }}
     secrets: inherit
 
-  deploy-html:
+  deploy-python:
     needs: detect
-    if: needs.detect.outputs.tech == 'html'
-    uses: cbcbmbtTest/ops/.github/workflows/deploy-html.yml@main
+    if: needs.detect.outputs.tech == 'python'
+    uses: cbcbmbtTest/ops/.github/workflows/deploy-python.yml@main
     with:
       repo: ${{ inputs.repo }}
       slug: ${{ needs.detect.outputs.slug }}
